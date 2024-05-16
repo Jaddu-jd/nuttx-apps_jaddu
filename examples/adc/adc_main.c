@@ -206,9 +206,9 @@ int main(int argc, FAR char *argv[])
   int fd;
   int errval = 0;
   int ret;
-  int i
+  int i;
 
-  ;int elapsed =0;
+  int elapsed =0;
   int required  = 10;
 
   UNUSED(ret);
