@@ -1,5 +1,5 @@
 /****************************************************************************
- * apps/examples/hello/hello_main.c
+ * apps/examples/adc/adc.h
  *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -18,23 +18,61 @@
  *
  ****************************************************************************/
 
+#ifndef __APPS_EXAMPLES_ADC_ADC_H
+#define __APPS_EXAMPLES_ADC_ADC_H
+
 /****************************************************************************
  * Included Files
  ****************************************************************************/
 
 #include <nuttx/config.h>
-#include <stdio.h>
 
 /****************************************************************************
- * Public Functions
+ * Pre-processor Definitions
  ****************************************************************************/
+
+/* Configuration ************************************************************/
+
+/* CONFIG_NSH_BUILTIN_APPS - Build the ADC test as an NSH built-in function.
+ *  Default: Built as a standalone program
+ * CONFIG_EXAMPLES_ADC_DEVPATH - The default path to the ADC device.
+ *   Default: /dev/adc0
+ * CONFIG_EXAMPLES_ADC_NSAMPLES - This number of samples is
+ *   collected and the program terminates.  Default:  Samples are collected
+ *   indefinitely.
+ * CONFIG_EXAMPLES_ADC_GROUPSIZE - The number of samples to read at once.
+ *   Default: 4
+ */
+
+#ifndef CONFIG_ADC
+#  error "ADC device support is not enabled (CONFIG_ADC)"
+#endif
+
+#ifndef CONFIG_EXAMPLES_ADC_DEVPATH
+#  define CONFIG_EXAMPLES_ADC_DEVPATH "/dev/adc0"
+#endif
+
+#ifndef CONFIG_EXAMPLES_ADC_GROUPSIZE
+#  define CONFIG_EXAMPLES_ADC_GROUPSIZE 4
+#endif
 
 /****************************************************************************
- * hello_main
+ * Public Types
  ****************************************************************************/
 
-int main(int argc, FAR char *argv[])
+struct adc_state_s
 {
-  printf("Hello, World!! how's it going\n seeing if errors arise or system crashes\n");
-  return 0;
-}
+  bool      initialized;
+  FAR char *devpath;
+  int       count;
+};
+
+/****************************************************************************
+ * Public Data
+ ****************************************************************************/
+
+/****************************************************************************
+ * Public Function Prototypes
+ ****************************************************************************/
+
+#endif /* __APPS_EXAMPLES_ADC_ADC_H */

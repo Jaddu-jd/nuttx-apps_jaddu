@@ -1,5 +1,5 @@
 /****************************************************************************
- * apps/examples/adc/adc_main.c
+ * apps/examples/spi_test/spi_test_main.c
  *
  * Licensed to the Apache Software Foundation (ASF) under one or more
  * contributor license agreements.  See the NOTICE file distributed with
@@ -38,31 +38,202 @@
 #include <nuttx/analog/adc.h>
 #include <nuttx/analog/ioctl.h>
 
+#include <nuttx/sensors/ioctl.h>
+
 #include "adc.h"
 
+#define IOCTL_MODE  1
+// #define READ_MODE   1
+
+#define MAX_CHANNELS  12
 /****************************************************************************
- * Pre-processor Definitions
+ * Public Functions
  ****************************************************************************/
-static struct adc_state_s g_adcstate;
-/****************************************************************************
- * Private Types
- ****************************************************************************/
+// struct 
 
 /****************************************************************************
- * Private Function Prototypes
+ * spi_test_main
  ****************************************************************************/
+static void adc_devpath(FAR struct adc_state_s *adc, FAR const char *devpath);
+int int_adc_main();
 
+
+struct satellite_health_s {
+	uint64_t timestamp;
+	float accl_x;
+	float accl_y;
+	float accl_z;
+	float gyro_x;
+	float gyro_y;
+	float gyro_z;
+	float mag_x;
+	float mag_y;
+	float mag_z;
+	int16_t temp_x;
+	int16_t temp_x1;
+	int16_t temp_y;
+	int16_t temp_y1;
+	int16_t temp_z;
+	int16_t temp_z1;
+	int16_t temp_bpb;
+	int16_t temp_obc;
+	int16_t temp_com;
+	int16_t temp_batt;
+	uint16_t batt_volt;
+	int16_t sol_p1_v;
+	int16_t sol_p2_v;
+	int16_t sol_p3_v;
+	int16_t sol_p4_v;
+	int16_t sol_p5_v;
+	int16_t sol_t_v;
+	int16_t raw_v;
+	int16_t sol_p1_c;
+	int16_t sol_p2_c;
+	int16_t sol_p3_c;
+	int16_t sol_p4_c;
+	int16_t sol_p5_c;
+	int16_t sol_t_c;
+	int16_t rst_3v3_c;
+	int16_t raw_c;
+	uint16_t v3_main_c;
+	uint16_t v3_com_c;
+	uint16_t v3_2_c;
+	uint16_t v5_c;
+	uint16_t unreg_c;
+	uint16_t v4_c;
+	int16_t batt_c;
+	uint8_t rsv_cmd;
+	uint8_t ant_dep_stat;
+	uint8_t ul_state;
+	uint8_t oper_mode;
+	uint8_t msn_flag;
+	uint8_t rsv_flag;
+	uint8_t kill_switch;
+};
 /****************************************************************************
  * Private Data
  ****************************************************************************/
 
-/****************************************************************************
- * Public Data
- ****************************************************************************/
+static struct adc_state_s g_adcstate;
+
+int elapsed =0;
+int required  = 10;
 
 /****************************************************************************
- * Private Functions
+ * Name: parse_args
  ****************************************************************************/
+
+// static void parse_args(FAR struct adc_state_s *adc, int argc,
+//                        FAR char **argv)
+// {
+//   FAR char *ptr;
+//   FAR char *str;
+//   long value;
+//   int index;
+//   int nargs;
+
+//   for (index = 1; index < argc; )
+//     {
+//       ptr = argv[index];
+//       if (ptr[0] != '-')
+//         {
+//           printf("Invalid options format: %s\n", ptr);
+//           exit(0);
+//         }
+
+//       switch (ptr[1])
+//         {
+//           case 'n':
+//             nargs = arg_decimal(&argv[index], &value);
+//             if (value < 0)
+//               {
+//                 printf("Count must be non-negative: %ld\n", value);
+//                 exit(1);
+//               }
+
+//             adc->count = (uint32_t)value;
+//             index += nargs;
+//             break;
+
+//           case 'p':
+//             nargs = arg_string(&argv[index], &str);
+//             adc_devpath(adc, str);
+//             index += nargs;
+//             break;
+
+//           case 'h':
+//             adc_help(adc);
+//             exit(0);
+
+//           default:
+//             printf("Unsupported option: %s\n", ptr);
+//             adc_help(adc);
+//             exit(1);
+//         }
+//     }
+// }
+
+
+int main(int argc, FAR char *argv[])
+{
+  int fd;
+  int ret;
+  uint8_t raw_data[2] = {'\0'};
+  uint16_t combined_data[MAX_CHANNELS] = {'\0'};
+  printf("Examples CUBUS external ADC: %d", CONFIG_EXAMPLES_CUBUS_USE_EXT_ADC);
+ #if defined(CONFIG_EXAMPLES_CUBUS_USE_EXT_ADC)
+
+  printf("Going to Test the External ADC\n");
+  fd = open("/dev/ext_adc1", O_RDONLY);
+  if(fd < 0){
+    printf("Unable to open external ADC driver\n");
+    return -1;
+  }
+  printf("opened external ADC driver successfully\n Setting Manual Select mode...\n");
+
+  /* Get the set of BUTTONs supported */
+  ret = ioctl(fd, SNIOC_ADC_MANUAL_SELECT, NULL);
+  usleep(10);
+
+  printf("Setting ADC Select mode ... \n");
+  ret = ioctl(fd, SNIOC_ADC_AUTO_2_SELECT, NULL);
+  usleep(1000);
+
+  printf("Setting ADC Program mode ...\n");
+  ret = ioctl(fd, SNIOC_ADC_AUTO_2_PROGRAM, NULL);
+  usleep(1000);
+
+  #ifdef IOCTL_MODE
+  for(int i=0;i<MAX_CHANNELS;i++){
+    printf("Reading data from ADC %i \n", i);
+    ioctl(fd, SNIOC_ADC_AUTO_2_SELECT_READ,raw_data);
+    combined_data[i] = raw_data[0] << 8 | raw_data[1];
+    printf("Raw data: %x \n",combined_data[i]);
+    // usleep(100);
+  }
+
+  #else //ifndef IOCTL MODE
+  for (int i=0;i<MAX_CHANNELS;i++){
+    int ret1 = read(fd, &raw_data, 2);
+    if(ret1<0){
+      printf("Data not received from ADC");
+      return -1;
+    }
+    printf("No of Bytes available: %d",ret1);
+    combined_data[i] = raw_data[0] << 8 | raw_data[1];
+    printf("\n\n\n");
+  }
+  #endif  //IOCTL MODE
+  #endif  //CONFIG_EXAMPLES_CUBUS_USE_EXT_ADC
+
+  #ifdef CONFIG_EXAMPLES_CUBUS_USE_INT_ADC
+    int_adc_main();
+  #endif  //EXAMPLES_CUBUS_USE_INT_ADC
+
+  return 0;
+}
+
+
 
 /****************************************************************************
  * Name: adc_devpath
@@ -83,133 +254,18 @@ static void adc_devpath(FAR struct adc_state_s *adc, FAR const char *devpath)
 }
 
 /****************************************************************************
- * Name: adc_help
- ****************************************************************************/
-
-static void adc_help(FAR struct adc_state_s *adc)
-{
-  printf("Usage: adc [OPTIONS]\n");
-  printf("\nArguments are \"sticky\".  "
-         "For example, once the ADC device is\n");
-  printf("specified, that device will be re-used until it is changed.\n");
-  printf("\n\"sticky\" OPTIONS include:\n");
-  printf("  [-p devpath] selects the ADC device.  "
-         "Default: %s Current: %s\n",
-         CONFIG_EXAMPLES_ADC_DEVPATH,
-         g_adcstate.devpath ? g_adcstate.devpath : "NONE");
-  printf("  [-n count] selects the samples to collect.  "
-         "Default: 1 Current: %d\n", adc->count);
-  printf("  [-h] shows this message and exits\n");
-}
-
-/****************************************************************************
- * Name: arg_string
- ****************************************************************************/
-
-static int arg_string(FAR char **arg, FAR char **value)
-{
-  FAR char *ptr = *arg;
-
-  if (ptr[2] == '\0')
-    {
-      *value = arg[1];
-      return 2;
-    }
-  else
-    {
-      *value = &ptr[2];
-      return 1;
-    }
-}
-
-/****************************************************************************
- * Name: arg_decimal
- ****************************************************************************/
-
-static int arg_decimal(FAR char **arg, FAR long *value)
-{
-  FAR char *string;
-  int ret;
-
-  ret = arg_string(arg, &string);
-  *value = strtol(string, NULL, 10);
-  return ret;
-}
-
-/****************************************************************************
- * Name: parse_args
- ****************************************************************************/
-
-static void parse_args(FAR struct adc_state_s *adc, int argc,
-                       FAR char **argv)
-{
-  FAR char *ptr;
-  FAR char *str;
-  long value;
-  int index;
-  int nargs;
-
-  for (index = 1; index < argc; )
-    {
-      ptr = argv[index];
-      if (ptr[0] != '-')
-        {
-          printf("Invalid options format: %s\n", ptr);
-          exit(0);
-        }
-
-      switch (ptr[1])
-        {
-          case 'n':
-            nargs = arg_decimal(&argv[index], &value);
-            if (value < 0)
-              {
-                printf("Count must be non-negative: %ld\n", value);
-                exit(1);
-              }
-
-            adc->count = (uint32_t)value;
-            index += nargs;
-            break;
-
-          case 'p':
-            nargs = arg_string(&argv[index], &str);
-            adc_devpath(adc, str);
-            index += nargs;
-            break;
-
-          case 'h':
-            adc_help(adc);
-            exit(0);
-
-          default:
-            printf("Unsupported option: %s\n", ptr);
-            adc_help(adc);
-            exit(1);
-        }
-    }
-}
-
-/****************************************************************************
- * Public Functions
- ****************************************************************************/
-
-/****************************************************************************
  * Name: adc_main
  ****************************************************************************/
 
-int main(int argc, FAR char *argv[])
+int int_adc_main()
 {
-  struct adc_msg_s sample[CONFIG_EXAMPLES_ADC_GROUPSIZE];
+  struct adc_msg_s sample[CONFIG_EXAMPLES_CUBUS_INT_ADC_GROUPSIZE];
   size_t readsize;
   ssize_t nbytes;
   int fd;
   int errval = 0;
   int ret;
-  int i
-
-  ;int elapsed =0;
-  int required  = 10;
+  int i;
 
   UNUSED(ret);
 
@@ -223,16 +279,14 @@ int main(int argc, FAR char *argv[])
 
       /* Set the default values */
 
-      adc_devpath(&g_adcstate, CONFIG_EXAMPLES_ADC_DEVPATH);
+      adc_devpath(&g_adcstate, CONFIG_EXAMPLES_CUBUS_INT_ADC_DEVPATH);
 
       g_adcstate.initialized = true;
     }
 
-  g_adcstate.count = CONFIG_EXAMPLES_ADC_NSAMPLES;
+  g_adcstate.count = CONFIG_EXAMPLES_CUBUS_INT_ADC_NSAMPLES;
 
   /* Parse the command line */
-
-  parse_args(&g_adcstate, argc, argv);
 
   /* If this example is configured as an NX add-on, then limit the number of
    * samples that we collect before returning.  Otherwise, we never return
@@ -270,7 +324,7 @@ int main(int argc, FAR char *argv[])
       elapsed = 0;
       fflush(stdout);
 
-#ifdef CONFIG_EXAMPLES_ADC_SWTRIG
+#ifdef CONFIG_EXAMPLES_CUBUS_INT_ADC_SWTRIG
       /* Issue the software trigger to start ADC conversion */
 
       ret = ioctl(fd, ANIOC_TRIGGER, 0);
@@ -283,10 +337,10 @@ int main(int argc, FAR char *argv[])
 
       /* Read up to CONFIG_EXAMPLES_ADC_GROUPSIZE samples */
 
-      readsize = CONFIG_EXAMPLES_ADC_GROUPSIZE * sizeof(struct adc_msg_s);
+      readsize = CONFIG_EXAMPLES_CUBUS_INT_ADC_GROUPSIZE * sizeof(struct adc_msg_s);
       nbytes = read(fd, sample, readsize);
 
-      printf("Readsize: %d \n nbytes: %d\n CONFIG_EXAMPLES_ADC_GROUPSIZE : %d \n ADCSTATE READCOUNT: %d \r\n",readsize, nbytes, CONFIG_EXAMPLES_ADC_GROUPSIZE, g_adcstate.count);
+      printf("Readsize: %d \n nbytes: %d\n EXAMPLES_CUBUS_INT_ADC_GROUPSIZE : %d \n ADCSTATE READCOUNT: %d \r\n",readsize, nbytes, CONFIG_EXAMPLES_CUBUS_INT_ADC_GROUPSIZE, g_adcstate.count);
 
       // if(nbytes < 40){
       //   printf("nbytes is less than 40. Reading again \n");
@@ -355,3 +409,4 @@ errout:
   close(fd);
   return errval;
 }
+
