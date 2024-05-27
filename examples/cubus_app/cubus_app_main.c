@@ -37,15 +37,24 @@
 
 #include <nuttx/analog/adc.h>
 #include <nuttx/analog/ioctl.h>
+#include <nuttx/analog/ads7953.h>
 
-#include <nuttx/sensors/ioctl.h>
+// #include <nuttx/sensors/ioctl.h>
 
 #include "adc.h"
+#include "cubus_app_main.h"
+#include "math.h"
 
 #define IOCTL_MODE  1
 // #define READ_MODE   1
 
-#define MAX_CHANNELS  12
+#define EXT_ADC_MAX_CHANNELS  12
+
+#define RES_LMP8640				0.025
+#define GAIN_LMP8640			10
+
+#define SENS_TMCS				264
+
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
@@ -58,79 +67,54 @@ static void adc_devpath(FAR struct adc_state_s *adc, FAR const char *devpath);
 int int_adc_main();
 
 
-struct satellite_health_s {
-	uint64_t timestamp;
-	float accl_x;
-	float accl_y;
-	float accl_z;
-	float gyro_x;
-	float gyro_y;
-	float gyro_z;
-	float mag_x;
-	float mag_y;
-	float mag_z;
-	int16_t temp_x;
-	int16_t temp_x1;
-	int16_t temp_y;
-	int16_t temp_y1;
-	int16_t temp_z;
-	int16_t temp_z1;
-	int16_t temp_bpb;
-	int16_t temp_obc;
-	int16_t temp_com;
-	int16_t temp_batt;
-	uint16_t batt_volt;
-	int16_t sol_p1_v;
-	int16_t sol_p2_v;
-	int16_t sol_p3_v;
-	int16_t sol_p4_v;
-	int16_t sol_p5_v;
-	int16_t sol_t_v;
-	int16_t raw_v;
-	int16_t sol_p1_c;
-	int16_t sol_p2_c;
-	int16_t sol_p3_c;
-	int16_t sol_p4_c;
-	int16_t sol_p5_c;
-	int16_t sol_t_c;
-	int16_t rst_3v3_c;
-	int16_t raw_c;
-	uint16_t v3_main_c;
-	uint16_t v3_com_c;
-	uint16_t v3_2_c;
-	uint16_t v5_c;
-	uint16_t unreg_c;
-	uint16_t v4_c;
-	int16_t batt_c;
-	uint8_t rsv_cmd;
-	uint8_t ant_dep_stat;
-	uint8_t ul_state;
-	uint8_t oper_mode;
-	uint8_t msn_flag;
-	uint8_t rsv_flag;
-	uint8_t kill_switch;
-};
 /****************************************************************************
  * Private Data
  ****************************************************************************/
-
-static struct adc_state_s g_adcstate;
+static struct adc_state_s g_adcstate1;
+static struct adc_state_s g_adcstate3;
 
 int elapsed =0;
 int required  = 10;
 
-struct adc_msg_s sample[CONFIG_EXAMPLES_CUBUS_INT_ADC_GROUPSIZE];
-size_t readsize;
-ssize_t nbytes;
-int fd;
-int errval = 0;
 int ret;
-int i;
+int i = 0; 
+char buffer[255] = {'\0'};
 
- int fd;
+typedef struct {
+  size_t readsize;
+  ssize_t nbytes;
+  int fd;
+  int errval;
   int ret;
-  uint8_t raw_data[2] = {'\0'};
-  uint16_t combined_data[MAX_CHANNELS] = {'\0'};
+}int_adc_config_s;
+
+
+typedef struct {
+  int fd;
+}ext_adc_config_s;
+
+
+
+#ifdef CONFIG_EXAMPLES_CUBUS_USE_INT_ADC1
+  int_adc_config_s adc1_config;
+  struct adc_msg_s int_adc1_sample[CONFIG_EXAMPLES_CUBUS_INT_ADC1_GROUPSIZE];
+#endif
+
+#ifdef CONFIG_EXAMPLES_CUBUS_USE_INT_ADC3
+  int_adc_config_s adc3_config;
+  struct adc_msg_s int_adc3_sample[CONFIG_EXAMPLES_CUBUS_INT_ADC3_GROUPSIZE];
+#endif
+
+#ifdef CONFIG_EXAMPLES_CUBUS_USE_EXT_ADC
+  ext_adc_config_s ext_adc_config;
+#endif
+
+uint8_t raw_data[2] = {'\0'};
+uint16_t combined_data[EXT_ADC_MAX_CHANNELS] = {'\0'};
+float processed_data_ext_adc[EXT_ADC_MAX_CHANNELS] = {'\0'};
+
+satellite_health_s sat_health;
+ext_adc_s ext_adc_data[EXT_ADC_MAX_CHANNELS];
 
 /****************************************************************************
  * Name: parse_args
@@ -138,20 +122,513 @@ int i;
 
 int main(int argc, FAR char *argv[])
 {
- 
-  printf("Examples CUBUS external ADC: %d", CONFIG_EXAMPLES_CUBUS_USE_EXT_ADC);
- #if defined(CONFIG_EXAMPLES_CUBUS_USE_EXT_ADC)
+  
+  #if defined(CONFIG_EXAMPLES_CUBUS_USE_EXT_ADC)
   ext_adc_main();
   #endif  //CONFIG_EXAMPLES_CUBUS_USE_EXT_ADC
 
-  #ifdef CONFIG_EXAMPLES_CUBUS_USE_INT_ADC
-    int_adc_main();
+  #ifdef CONFIG_EXAMPLES_CUBUS_USE_INT_ADC1
+  read_int_adc1();
   #endif  //EXAMPLES_CUBUS_USE_INT_ADC
+
+  #ifdef CONFIG_EXAMPLES_CUBUS_USE_INT_ADC3
+  read_int_adc3();
+  #endif
+
+  make_satellite_health();
+
+  print_satellite_health_data();
 
   return 0;
 }
 
 
+/****************************************************************************
+ * Name: adc_main
+ ****************************************************************************/
+
+#ifdef CONFIG_EXAMPLES_CUBUS_USE_INT_ADC1
+int read_int_adc1(){
+
+  UNUSED(ret);
+
+  /* Check if we have initialized */
+  if (!g_adcstate1.initialized)
+    {
+      /* Initialization of the ADC hardware must be performed by
+       * board-specific logic prior to running this test.
+       */
+
+      /* Set the default values */
+
+      adc_devpath(&g_adcstate1, CONFIG_EXAMPLES_CUBUS_INT_ADC1_DEVPATH);
+
+      g_adcstate1.initialized = true;
+    }
+
+  g_adcstate1.count = CONFIG_EXAMPLES_CUBUS_INT_ADC1_NSAMPLES;
+
+  /* Parse the command line */
+
+  /* If this example is configured as an NX add-on, then limit the number of
+   * samples that we collect before returning.  Otherwise, we never return
+   */
+
+  printf("adc_main: g_adcstate.count: %d\n", g_adcstate1.count);
+
+  /* Open the ADC device for reading */
+
+  printf("adc_main: Hardware initialized. Opening the ADC device: %s\n",
+         g_adcstate1.devpath);
+  
+  /* Opening internal ADC1 */
+  adc1_config.fd = open("/dev/adc0", O_RDONLY);
+  if (adc1_config.fd < 0)
+    {
+      printf("adc_main: open %s failed: %d\n", g_adcstate1.devpath, errno);
+      adc1_config.errval = 2;
+      goto errout;
+    }
+    elapsed = 0;
+    while(elapsed<required){
+        usleep(1);
+        elapsed++;
+    }
+  /* Now loop the appropriate number of times, displaying the collected
+   * ADC samples.
+   */
+  // UNUSED(elapsed);
+  // UNUSED(required);
+  for (int j =0; j<1; j++)
+    {
+      /* Flush any output before the loop entered or from the previous pass
+       * through the loop.
+       */
+      elapsed = 0;
+      fflush(stdout);
+
+#ifdef CONFIG_EXAMPLES_CUBUS_INT_ADC1_SWTRIG
+      /* Issue the software trigger to start ADC conversion */
+
+      ret = ioctl(adc1_config.fd, ANIOC_TRIGGER, 0);
+      if (ret < 0)
+        {
+          int errcode = errno;
+          printf("adc_main: ANIOC_TRIGGER ioctl failed: %d\n", errcode);
+        }
+#endif
+
+      /* Read up to CONFIG_EXAMPLES_ADC_GROUPSIZE samples */
+
+      adc1_config.readsize = CONFIG_EXAMPLES_CUBUS_INT_ADC1_GROUPSIZE * sizeof(struct adc_msg_s);
+      adc1_config.nbytes = read(adc1_config.fd, int_adc1_sample, adc1_config.readsize);
+
+      printf("Readsize: %d \n nbytes: %d\n EXAMPLES_CUBUS_INT_ADC_GROUPSIZE : %d \n ADCSTATE READCOUNT: %d \r\n",adc1_config.readsize, adc1_config.nbytes, CONFIG_EXAMPLES_CUBUS_INT_ADC1_GROUPSIZE, g_adcstate1.count);
+
+      /* Handle unexpected return values */
+      if (adc1_config.nbytes < 0)
+        {
+          adc1_config.errval = errno;
+          if (adc1_config.errval != EINTR)
+            {
+              printf("adc_main: read %s failed: %d\n",
+                     g_adcstate1.devpath, adc1_config.errval);
+              adc1_config.errval = 3;
+              goto errout_with_dev;
+            }
+
+          printf("adc_main: Interrupted read...\n");
+        }
+      else if (adc1_config.nbytes == 0)
+        {
+          printf("adc_main: No data read, Ignoring\n");
+        }
+
+      /* Print the sample data on successful return */
+
+      else
+        {
+          int nsamples = adc1_config.nbytes / sizeof(struct adc_msg_s);
+          if (nsamples * sizeof(struct adc_msg_s) != adc1_config.nbytes)
+            {
+              printf("adc_main: read size=%ld is not a multiple of "
+                     "sample size=%d, Ignoring\n",
+                     (long)adc1_config.nbytes, sizeof(struct adc_msg_s));
+            }
+          else
+            {
+              printf("Sample:\n");
+              for (i = 0; i < nsamples; i++)
+                {
+                  printf("%d: channel: %d value: %" PRId32 "\n",
+                         i + 1, int_adc1_sample[i].am_channel, int_adc1_sample[i].am_data);
+                }
+            }
+        }
+
+      if (g_adcstate1.count && --g_adcstate1.count <= 0)
+        {
+          break;
+        }
+    }
+    
+
+  close(adc1_config.fd);
+  return OK;
+
+/* Error exits */
+errout_with_dev:
+  close(adc1_config.fd);
+
+errout:
+  printf("Terminating!\n");
+  fflush(stdout);
+  close(adc1_config.fd);
+  return adc1_config.errval;
+}
+#endif  //CONFIG_EAMPLES_CUBUS_USE_ADC_1
+
+/****************************************************************************
+ * Name: adc_main
+ ****************************************************************************/
+
+#ifdef CONFIG_EXAMPLES_CUBUS_USE_INT_ADC3
+int read_int_adc3(){
+
+  UNUSED(ret);
+
+  /* Check if we have initialized */
+  if (!g_adcstate3.initialized)
+    {
+      /* Initialization of the ADC hardware must be performed by
+       * board-specific logic prior to running this test.
+       */
+
+      /* Set the default values */
+
+      adc_devpath(&g_adcstate3, CONFIG_EXAMPLES_CUBUS_INT_ADC3_DEVPATH);
+
+      g_adcstate3.initialized = true;
+    }
+
+  g_adcstate3.count = CONFIG_EXAMPLES_CUBUS_INT_ADC3_NSAMPLES;
+
+  /* Parse the command line */
+
+  /* If this example is configured as an NX add-on, then limit the number of
+   * samples that we collect before returning.  Otherwise, we never return
+   */
+
+  printf("adc_main: g_adcstate.count: %d\n", g_adcstate3.count);
+
+  /* Open the ADC device for reading */
+
+  printf("adc_main: Hardware initialized. Opening the ADC device: %s\n",
+         g_adcstate3.devpath);
+  
+  /* Opening internal ADC1 */
+  adc3_config.fd = open("/dev/adc0", O_RDONLY);
+  if (adc3_config.fd < 0)
+    {
+      printf("adc_main: open %s failed: %d\n", g_adcstate3.devpath, errno);
+      adc3_config.errval = 2;
+      goto errout;
+    }
+    elapsed = 0;
+    while(elapsed<required){
+        usleep(1);
+        elapsed++;
+    }
+  /* Now loop the appropriate number of times, displaying the collected
+   * ADC samples.
+   */
+  // UNUSED(elapsed);
+  // UNUSED(required);
+  for (int k = 0; k<1; k++)
+    {
+      /* Flush any output before the loop entered or from the previous pass
+       * through the loop.
+       */
+      elapsed = 0;
+      fflush(stdout);
+
+#ifdef CONFIG_EXAMPLES_CUBUS_INT_ADC3_SWTRIG
+      /* Issue the software trigger to start ADC conversion */
+
+      ret = ioctl(adc3_config.fd, ANIOC_TRIGGER, 0);
+      if (ret < 0)
+        {
+          int errcode = errno;
+          printf("adc_main: ANIOC_TRIGGER ioctl failed: %d\n", errcode);
+        }
+#endif
+
+      /* Read up to CONFIG_EXAMPLES_ADC_GROUPSIZE samples */
+
+      adc3_config.readsize = CONFIG_EXAMPLES_CUBUS_INT_ADC3_GROUPSIZE * sizeof(struct adc_msg_s);
+      adc3_config.nbytes = read(adc3_config.fd, int_adc3_sample, adc3_config.readsize);
+
+      printf("Readsize: %d \n nbytes: %d\n EXAMPLES_CUBUS_INT_ADC_GROUPSIZE : %d \n ADCSTATE READCOUNT: %d \r\n",adc3_config.readsize, adc3_config.nbytes, CONFIG_EXAMPLES_CUBUS_INT_ADC3_GROUPSIZE, g_adcstate3.count);
+
+      /* Handle unexpected return values */
+      if (adc3_config.nbytes < 0)
+        {
+          adc3_config.errval = errno;
+          if (adc3_config.errval != EINTR)
+            {
+              printf("adc_main: read %s failed: %d\n",
+                     g_adcstate3.devpath, adc3_config.errval);
+              adc3_config.errval = 3;
+              goto errout_with_dev;
+            }
+
+          printf("adc_main: Interrupted read...\n");
+        }
+      else if (adc3_config.nbytes == 0)
+        {
+          printf("adc_main: No data read, Ignoring\n");
+        }
+
+      /* Print the sample data on successful return */
+      else
+        {
+          int nsamples = adc3_config.nbytes / sizeof(struct adc_msg_s);
+          if (nsamples * sizeof(struct adc_msg_s) != adc3_config.nbytes)
+            {
+              printf("adc_main: read size=%ld is not a multiple of "
+                     "sample size=%d, Ignoring\n",
+                     (long)adc3_config.nbytes, sizeof(struct adc_msg_s));
+            }
+          else
+            {
+              printf("Sample:\n");
+              for (i = 0; i < nsamples; i++)
+                {
+                  printf("%d: channel: %d value: %" PRId32 "\n",
+                         i + 1, int_adc3_sample[i].am_channel, int_adc3_sample[i].am_data);
+                }
+            }
+        }
+
+      if (g_adcstate3.count && --g_adcstate3.count <= 0)
+        {
+          break;
+        }
+    }
+    
+
+  close(adc3_config.fd);
+  return OK;
+
+/* Error exits */
+errout_with_dev:
+  close(adc3_config.fd);
+
+errout:
+  printf("Terminating!\n");
+  fflush(stdout);
+  close(adc3_config.fd);
+  return adc3_config.errval;
+}
+#endif //CONFIG_EXAMPLES_CUBUS_USE_INT_ADC3
+
+/****************************************************************************
+ * Name: adc_main
+ ****************************************************************************/
+
+#ifdef CONFIG_EXAMPLES_CUBUS_USE_EXT_ADC
+int ext_adc_main(){
+  
+  printf("Going to Test the External ADC\n");
+  ext_adc_config.fd = open("/dev/ext_adc1", O_RDONLY);
+  if(ext_adc_config.fd < 0){
+    printf("Unable to open external ADC driver\n");
+    return -1;
+  }
+  printf("opened external ADC driver successfully\n");
+  /* Get the set of BUTTONs supported */
+  ret = ioctl(ext_adc_config.fd, ANIOC_ADC_MANUAL_SELECT, NULL);
+  usleep(10);
+  ret = ioctl(ext_adc_config.fd, ANIOC_ADC_AUTO_2_SELECT, NULL);
+  usleep(1000);
+  ret = ioctl(ext_adc_config.fd, ANIOC_ADC_AUTO_2_PROGRAM, NULL);
+  usleep(1000);
+
+  #ifdef IOCTL_MODE
+  for(int i=0;i<EXT_ADC_MAX_CHANNELS;i++){
+    ioctl(ext_adc_config.fd, ANIOC_ADC_AUTO_2_SELECT_READ,raw_data);
+
+    /* Separate Channel ID and corresponding data */
+
+    combined_data[i] = raw_data[0] << 8 | raw_data[1];
+    ext_adc_data[i].chan = combined_data[i] >> 12 & 0xff;
+    ext_adc_data[i].raw_data = (int16_t)combined_data[i] & 0x0fff;
+    ext_adc_data[i].raw_data = (2.5 * ext_adc_data[i].raw_data)/4095;
+    // sprintf(buffer,"%.2f",ext_adc_data[i].raw_data);
+    printf("Channel: %d   value: %d \r\n",ext_adc_data[i].chan, (int)ext_adc_data[i].raw_data);
+
+    if(i == 9){ //battery temperature channel
+      float res = (ext_adc_data[i].raw_data * 10000) / (2.5 - ext_adc_data[i].raw_data);
+      float tempK = (3976 * 298) / (3976 - (298 * log(10000 / res)));
+      ext_adc_data[i].processed_data = (tempK - 273) * 100;
+    }else if(i == 8 || i == 10 || i == 11){ //other temperature channels (antenna, bpb, z panel)
+      float root = sqrtf((5.506 * 5.506) + (4 * 0.00176 * (870.6 - (ext_adc_data[i].raw_data * 1000))));
+			ext_adc_data[i].processed_data = ((((5.506 - (root) / (2 * (-0.00176))) + 30)) * 100);
+    }else{
+      ext_adc_data[i].processed_data = (ext_adc_data[i].raw_data * (1100 + 931)) / 931;
+    }
+  }
+
+  #else //ifndef IOCTL MODE
+  for (int i=0;i<EXT_ADC_EXT_ADC_MAX_CHANNELS;i++){
+    int ret1 = read(ext_adc_config.fd, &raw_data, 2);
+    if(ret1<0){
+      printf("Data not received from ADC");
+      return -1;
+    }
+    printf("No of Bytes available: %d",ret1);
+    combined_data[i] = raw_data[0] << 8 | raw_data[1];
+    printf("\n\n\n");
+  }
+  #endif  //IOCTL MODE
+}
+#endif
+
+
+/****************************************************************************
+ * Name: adc_main
+ ****************************************************************************/
+
+void make_satellite_health(){
+
+  float int_adc1_temp[CONFIG_EXAMPLES_CUBUS_INT_ADC1_NSAMPLES] = {'\0'};  
+  int_adc1_data_convert(int_adc1_temp);
+
+  float int_adc3_temp[CONFIG_EXAMPLES_CUBUS_INT_ADC3_NSAMPLES] = {'\0'};
+  int_adc3_data_convert(int_adc3_temp);
+
+  /* External ADC data */
+  sat_health.sol_t_v = (int16_t)ext_adc_data[0].processed_data;
+  sat_health.raw_v = (int16_t)ext_adc_data[1].processed_data;
+  sat_health.sol_p5_v = (int16_t)ext_adc_data[2].processed_data;
+  sat_health.sol_p4_v = (int16_t)ext_adc_data[3].processed_data;
+  sat_health.sol_p3_v = (int16_t)ext_adc_data[4].processed_data;
+  sat_health.sol_p1_v = (int16_t)ext_adc_data[5].processed_data;
+  sat_health.sol_p2_v = (int16_t)ext_adc_data[6].processed_data;
+
+  sat_health.ant_temp_out = (int16_t)ext_adc_data[8].processed_data;
+  // sat_health.temp_batt = (int16_t)ext_adc_data[9].processed_data;
+  sat_health.temp_bpb = (int16_t)ext_adc_data[10].processed_data;
+  sat_health.temp_z = (int16_t)ext_adc_data[11].processed_data;
+
+  /* Internal ADC1 data */
+  sat_health.batt_c = (int16_t)int_adc1_temp[9];
+  sat_health.sol_t_c = (int16_t)int_adc1_temp[10];
+  sat_health.raw_c = (int16_t)int_adc1_temp[11];
+
+  sat_health.unreg_c = (int16_t)int_adc1_temp[0];
+  sat_health.v3_main_c = (int16_t)int_adc1_temp[1];
+  sat_health.v3_com_c = (int16_t)int_adc1_temp[2];
+  sat_health.v5_c = (int16_t)int_adc1_temp[3];
+
+  sat_health.batt_volt = (int16_t)int_adc1_temp[4];
+
+  sat_health.sol_p1_c = (int16_t)int_adc1_temp[5];
+  sat_health.v3_2_c = (int16_t)int_adc1_temp[6];
+  sat_health.sol_p4_c = (int16_t)int_adc1_temp[7];
+  sat_health.sol_p5_c = (int16_t)int_adc1_temp[8];
+
+  sat_health.sol_p2_c = (int16_t)int_adc1_temp[12];
+  sat_health.sol_p3_c = (int16_t)int_adc1_temp[13];
+
+  /* internal adc2 data*/
+  sat_health.v4_c = (int16_t)int_adc3_temp[0];
+}
+
+/*
+*/
+void print_satellite_health_data(){
+  printf(" *******************************************\r\n");
+  printf(" |   Solar Panel 1 Voltage: \t %d \t|\r\n",sat_health.sol_p1_v);
+  printf(" |   Solar Panel 2 Voltage: \t %d \t|\r\n",sat_health.sol_p2_v);
+  printf(" |   Solar Panel 3 Voltage: \t %d \t|\r\n",sat_health.sol_p3_v);
+  printf(" |   Solar Panel 4 Voltage: \t %d \t|\r\n",sat_health.sol_p4_v);
+  printf(" |   Solar Panel 5 Voltage: \t %d \t|\r\n",sat_health.sol_p5_v);
+  printf(" |   Solar Panel T Voltage: \t %d \t|\r\n", sat_health.sol_t_v);
+  printf(" |--------------------------------------|\r\n");
+  printf(" |   Solar Panel 1 Current: \t %d \t|\r\n",sat_health.sol_p1_c);
+  printf(" |   Solar Panel 2 Current: \t %d \t|\r\n",sat_health.sol_p2_c);
+  printf(" |   Solar Panel 3 Current: \t %d \t|\r\n",sat_health.sol_p3_c);
+  printf(" |   Solar Panel 4 Current: \t %d \t|\r\n",sat_health.sol_p4_c);
+  printf(" |   Solar Panel 5 Current: \t %d \t|\r\n",sat_health.sol_p5_c);
+  printf(" |   Solar Panel T Current: \t %d \t|\r\n",sat_health.sol_t_c);
+  printf(" |--------------------------------------|\r\n");
+  printf(" |   Unreg Line Current:    \t %d \t|\r\n",sat_health.unreg_c);
+  printf(" |   Main 3v3 Current:      \t %d \t|\r\n",sat_health.v3_main_c);
+  printf(" |   COM 3v3 Current:       \t %d \t|\r\n",sat_health.v3_com_c);
+  printf(" |   5 Volts line Current:  \t %d \t|\r\n", sat_health.v5_c);
+  printf(" |   3v3 2 line Current:    \t %d \t|\r\n", sat_health.v3_2_c); 
+  printf(" |--------------------------------------|\r\n");
+  printf(" |   Raw Current:           \t %d \t|\r\n", sat_health.raw_c);
+  printf(" |   Raw Voltage:           \t %d \t|\r\n", sat_health.raw_v);
+  printf(" |--------------------------------------|\r\n");
+  printf(" |   Battery Total Voltage: \t %d \t|\r\n",sat_health.batt_volt);
+  printf(" |   Battery Total Current: \t %d \t|\r\n", sat_health.batt_c);
+  printf(" |   Battery Temperature:   \t %d \t|\r\n", sat_health.temp_batt);
+  printf(" *********************************************\r\n");
+}
+
+/****************************************************************************
+ * Name: int_adc1_data_convert
+ * 
+ * Parameters: *temp_buff -- pointer buffer where the data is stored after conversion
+ * 
+ * Details:
+ *   ADC_SUP -- 17th channel (doesn't have pinout) data is ADC_SUPP on vrefint 
+ *   Firstly, raw data is converted by using formula: channel_data * vrefint_data / 4095
+ *   Then data is converted according to current/voltage sensors data. LMP8640 is used to convert all current data except: raw_current, solar_total_current, and battery_current
+ *    
+ *    except batt_mon, everything is current data only ... 
+ * Channels and Corresponding data:
+ *  
+ ****************************************************************************/
+#ifdef CONFIG_EXAMPLES_CUBUS_USE_INT_ADC1
+void int_adc1_data_convert(float *temp_buff){
+
+  // float temp_buff[CONFIG_EXAMPLES_CUBUS_INT_ADC1_NSAMPLES];
+  float ADC_SUP = 1.2 * 4095/(int_adc1_sample[17].am_data);
+
+  for(int i=0;i<CONFIG_EXAMPLES_CUBUS_INT_ADC1_NSAMPLES;i++){
+    temp_buff[i] = int_adc1_sample[i].am_data * 1.2 / 4095; //right now, using 1.2 as vrefint channel data... converting all the data to their respective voltages
+    if(i == 4){
+      temp_buff[i] = temp_buff[i];  //this is for battery monitor (voltage data, no need for conversion)
+    }else if(i == 9 || i == 10 || i == 11){ //this one is for battery current, solar panel total current and raw current respectively
+      temp_buff[i] = ((temp_buff[i] - 1.65) / SENS_TMCS) * 1000 * 1000;
+    }
+    else{
+      //all current sensors use lmp8640 current sensor ... 
+      temp_buff[i] = (temp_buff[i]/(2*RES_LMP8640*GAIN_LMP8640))*1000;
+    }
+  }
+}
+#endif
+
+/****************************************************************************
+ * Name: int_adc3_data_convert
+ * 
+ * Parameters:  *temp_buff -- float pointer to the data that is converted 
+ * 
+ * Details:
+ *    only one channel data is converted by internal adc 3 i.e. 4V_I 
+ *    it uses LMP8640 current sensor, so same formula given above is used ...
+ ****************************************************************************/
+
+void int_adc3_data_convert(float *temp_buff){
+  for(int i=0;i<CONFIG_EXAMPLES_CUBUS_INT_ADC3_NSAMPLES;i++){
+    temp_buff[i] = int_adc3_sample[0].am_data * 1.2 / 4095;
+    temp_buff[i] = (temp_buff[i]/(2*RES_LMP8640*GAIN_LMP8640))*1000;
+  }
+}
 
 /****************************************************************************
  * Name: adc_devpath
@@ -171,196 +648,6 @@ static void adc_devpath(FAR struct adc_state_s *adc, FAR const char *devpath)
   adc->devpath = strdup(devpath);
 }
 
-/****************************************************************************
- * Name: adc_main
- ****************************************************************************/
 
-int int_adc_main()
-{
-  UNUSED(ret);
 
-  /* Check if we have initialized */
-
-  if (!g_adcstate.initialized)
-    {
-      /* Initialization of the ADC hardware must be performed by
-       * board-specific logic prior to running this test.
-       */
-
-      /* Set the default values */
-
-      adc_devpath(&g_adcstate, CONFIG_EXAMPLES_CUBUS_INT_ADC_DEVPATH);
-
-      g_adcstate.initialized = true;
-    }
-
-  g_adcstate.count = CONFIG_EXAMPLES_CUBUS_INT_ADC_NSAMPLES;
-
-  /* Parse the command line */
-
-  /* If this example is configured as an NX add-on, then limit the number of
-   * samples that we collect before returning.  Otherwise, we never return
-   */
-
-  printf("adc_main: g_adcstate.count: %d\n", g_adcstate.count);
-
-  /* Open the ADC device for reading */
-
-  printf("adc_main: Hardware initialized. Opening the ADC device: %s\n",
-         g_adcstate.devpath);
-  
-  fd = open("/dev/adc0", O_RDONLY);
-  if (fd < 0)
-    {
-      printf("adc_main: open %s failed: %d\n", g_adcstate.devpath, errno);
-      errval = 2;
-      goto errout;
-    }
-    elapsed = 0;
-    while(elapsed<required){
-        usleep(1);
-        elapsed++;
-    }
-  /* Now loop the appropriate number of times, displaying the collected
-   * ADC samples.
-   */
-  // UNUSED(elapsed);
-  // UNUSED(required);
-  for (; ; )
-    {
-      /* Flush any output before the loop entered or from the previous pass
-       * through the loop.
-       */
-      elapsed = 0;
-      fflush(stdout);
-
-#ifdef CONFIG_EXAMPLES_CUBUS_INT_ADC_SWTRIG
-      /* Issue the software trigger to start ADC conversion */
-
-      ret = ioctl(fd, ANIOC_TRIGGER, 0);
-      if (ret < 0)
-        {
-          int errcode = errno;
-          printf("adc_main: ANIOC_TRIGGER ioctl failed: %d\n", errcode);
-        }
-#endif
-
-      /* Read up to CONFIG_EXAMPLES_ADC_GROUPSIZE samples */
-
-      readsize = CONFIG_EXAMPLES_CUBUS_INT_ADC_GROUPSIZE * sizeof(struct adc_msg_s);
-      nbytes = read(fd, sample, readsize);
-
-      printf("Readsize: %d \n nbytes: %d\n EXAMPLES_CUBUS_INT_ADC_GROUPSIZE : %d \n ADCSTATE READCOUNT: %d \r\n",readsize, nbytes, CONFIG_EXAMPLES_CUBUS_INT_ADC_GROUPSIZE, g_adcstate.count);
-
-      // if(nbytes < 40){
-      //   printf("nbytes is less than 40. Reading again \n");
-      //   nbytes = read(fd, sample, readsize);
-      // }
-      /* Handle unexpected return values */
-
-      if (nbytes < 0)
-        {
-          errval = errno;
-          if (errval != EINTR)
-            {
-              printf("adc_main: read %s failed: %d\n",
-                     g_adcstate.devpath, errval);
-              errval = 3;
-              goto errout_with_dev;
-            }
-
-          printf("adc_main: Interrupted read...\n");
-        }
-      else if (nbytes == 0)
-        {
-          printf("adc_main: No data read, Ignoring\n");
-        }
-
-      /* Print the sample data on successful return */
-
-      else
-        {
-          int nsamples = nbytes / sizeof(struct adc_msg_s);
-          if (nsamples * sizeof(struct adc_msg_s) != nbytes)
-            {
-              printf("adc_main: read size=%ld is not a multiple of "
-                     "sample size=%d, Ignoring\n",
-                     (long)nbytes, sizeof(struct adc_msg_s));
-            }
-          else
-            {
-              printf("Sample:\n");
-              for (i = 0; i < nsamples; i++)
-                {
-                  printf("%d: channel: %d value: %" PRId32 "\n",
-                         i + 1, sample[i].am_channel, sample[i].am_data);
-                }
-            }
-        }
-
-      if (g_adcstate.count && --g_adcstate.count <= 0)
-        {
-          break;
-        }
-    }
-    
-
-  close(fd);
-  return OK;
-
-  /* Error exits */
-
-errout_with_dev:
-  close(fd);
-
-errout:
-  printf("Terminating!\n");
-  fflush(stdout);
-  close(fd);
-  return errval;
-}
-
-int ext_adc_main(){
-   printf("Going to Test the External ADC\n");
-  fd = open("/dev/ext_adc1", O_RDONLY);
-  if(fd < 0){
-    printf("Unable to open external ADC driver\n");
-    return -1;
-  }
-  printf("opened external ADC driver successfully\n Setting Manual Select mode...\n");
-
-  /* Get the set of BUTTONs supported */
-  ret = ioctl(fd, SNIOC_ADC_MANUAL_SELECT, NULL);
-  usleep(10);
-
-  printf("Setting ADC Select mode ... \n");
-  ret = ioctl(fd, SNIOC_ADC_AUTO_2_SELECT, NULL);
-  usleep(1000);
-
-  printf("Setting ADC Program mode ...\n");
-  ret = ioctl(fd, SNIOC_ADC_AUTO_2_PROGRAM, NULL);
-  usleep(1000);
-
-  #ifdef IOCTL_MODE
-  for(int i=0;i<MAX_CHANNELS;i++){
-    printf("Reading data from ADC %i \n", i);
-    ioctl(fd, SNIOC_ADC_AUTO_2_SELECT_READ,raw_data);
-    combined_data[i] = raw_data[0] << 8 | raw_data[1];
-    printf("Raw data: %x \n",combined_data[i]);
-    // usleep(100);
-  }
-
-  #else //ifndef IOCTL MODE
-  for (int i=0;i<MAX_CHANNELS;i++){
-    int ret1 = read(fd, &raw_data, 2);
-    if(ret1<0){
-      printf("Data not received from ADC");
-      return -1;
-    }
-    printf("No of Bytes available: %d",ret1);
-    combined_data[i] = raw_data[0] << 8 | raw_data[1];
-    printf("\n\n\n");
-  }
-  #endif  //IOCTL MODE
-}
 

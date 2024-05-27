@@ -1,0 +1,64 @@
+typedef struct  {
+	uint64_t timestamp;
+	float accl_x;
+	float accl_y;
+	float accl_z;
+	float gyro_x;
+	float gyro_y;
+	float gyro_z;
+	float mag_x;
+	float mag_y;
+	float mag_z;
+	int16_t temp_x;
+	int16_t temp_x1;
+	int16_t temp_y;
+	int16_t temp_y1;
+	int16_t temp_z;
+	int16_t temp_z1;
+	int16_t temp_bpb;
+	int16_t temp_obc;
+	int16_t temp_com;
+	int16_t temp_batt;
+	uint16_t batt_volt;
+	int16_t sol_p1_v;
+	int16_t sol_p2_v;
+	int16_t sol_p3_v;
+	int16_t sol_p4_v;
+	int16_t sol_p5_v;
+	int16_t sol_t_v;
+	int16_t raw_v;
+	int16_t sol_p1_c;
+	int16_t sol_p2_c;
+	int16_t sol_p3_c;
+	int16_t sol_p4_c;
+	int16_t sol_p5_c;
+	int16_t sol_t_c;
+	int16_t rst_3v3_c;
+	int16_t raw_c;
+	uint16_t v3_main_c;
+	uint16_t v3_com_c;
+	uint16_t v3_2_c;
+	uint16_t v5_c;
+	uint16_t unreg_c;
+	uint16_t v4_c;
+	int16_t batt_c;
+	uint8_t rsv_cmd;
+	uint8_t ant_dep_stat;
+	uint8_t ul_state;
+	uint8_t oper_mode;
+	uint8_t msn_flag;
+	uint8_t rsv_flag;
+	uint8_t kill_switch;
+    uint16_t ant_temp_out;
+}satellite_health_s;
+
+
+typedef struct {
+    uint8_t chan;
+    float raw_data;
+    float processed_data;
+}ext_adc_s;
+
+int ext_adc_main();
+int read_int_adc1();
+int read_int_adc3();

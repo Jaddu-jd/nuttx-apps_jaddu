@@ -26,7 +26,8 @@
 #include <stdio.h>
 #include <fcntl.h>
 #include <sys/ioctl.h>
-#include <nuttx/sensors/ioctl.h>
+#include <nuttx/analog/ioctl.h>
+#include <nuttx/analog/ads7953.h>
 
 #define IOCTL_MODE  1
 // #define READ_MODE   1
@@ -56,21 +57,21 @@ int main(int argc, FAR char *argv[])
   printf("opened external ADC driver successfully\n Setting Manual Select mode...\n");
 
   /* Get the set of BUTTONs supported */
-  ret = ioctl(fd, SNIOC_ADC_MANUAL_SELECT, NULL);
+  ret = ioctl(fd, ANIOC_ADC_MANUAL_SELECT, NULL);
   usleep(10);
 
   printf("Setting ADC Select mode ... \n");
-  ret = ioctl(fd, SNIOC_ADC_AUTO_2_SELECT, NULL);
+  ret = ioctl(fd, ANIOC_ADC_AUTO_2_SELECT, NULL);
   usleep(1000);
 
   printf("Setting ADC Program mode ...\n");
-  ret = ioctl(fd, SNIOC_ADC_AUTO_2_PROGRAM, NULL);
+  ret = ioctl(fd, ANIOC_ADC_AUTO_2_PROGRAM, NULL);
   usleep(1000);
 
   #ifdef IOCTL_MODE
   for(int i=0;i<MAX_CHANNELS;i++){
     printf("Reading data from ADC %i \n", i);
-    ioctl(fd, SNIOC_ADC_AUTO_2_SELECT_READ,raw_data);
+    ioctl(fd, ANIOC_ADC_AUTO_2_SELECT_READ,raw_data);
     combined_data[i] = raw_data[0] << 8 | raw_data[1];
     printf("Raw data: %x \n",combined_data[i]);
     // usleep(100);
