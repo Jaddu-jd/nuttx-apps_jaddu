@@ -27,7 +27,6 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <nuttx/sensors/sensor.h>
-#include "Fusion/Fusion.h"
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -42,7 +41,7 @@
  * Private Types
  ****************************************************************************/
 
-struct mpu6050_imu_msg
+FAR struct mpu6050_imu_msg
 {
   int16_t acc_x;
   int16_t acc_y;
@@ -60,6 +59,7 @@ struct mpu6050_imu_msg
 void read_mpu6050(int fd, struct sensor_accel *acc_data,
                   struct sensor_gyro *gyro_data);
 
+
 /****************************************************************************
  * sensor_fusion_main
  ****************************************************************************/
@@ -76,46 +76,40 @@ int main(int argc, char *argv[])
 
   struct sensor_accel imu_acc_data;
   struct sensor_gyro imu_gyro_data;
-  FusionVector accelerometer;
-  FusionVector gyroscope;
-  FusionEuler euler;
-  FusionAhrs ahrs;
+  //FusionVector accelerometer;
+  //FusionVector gyroscope;
+  //FusionEuler euler;
+  //FusionAhrs ahrs;
 
-  FusionAhrsInitialise(&ahrs);
+  //FusionAhrsInitialise(&ahrs);
 
   printf("Sensor Fusion example\n");
   printf("Sample Rate: %.2f Hz\n", 1.0 / acq_period);
 
-  fd = open("/dev/imu0", O_RDONLY);
+  fd = open("/dev/mpu6050", O_RDONLY);
   if (fd < 0)
     {
       printf("Failed to open imu0\n");
       return EXIT_FAILURE;
     }
+  else 
+  {
+    char x[5];
+   
+    for (int i = 0; i < iterations; i++)
+      {
+        read_mpu6050(fd, &imu_acc_data, &imu_gyro_data);
+      
+        // sscanf(x,"x:%lf",imu_gyro_data.x);
+        sscanf(x, "x:%lf", &imu_gyro_data.x);
+        printf("Accelerometer X: %d | Y: %d | Z: %d\n Gyroscope X:%s/%lf | Y: %lf | Z: %d\n",
+        (int)imu_acc_data.x,(int) imu_acc_data.y, (int)imu_acc_data.z,
+        x, imu_gyro_data.x,  imu_gyro_data.y, (int)imu_gyro_data.z
+        );
 
-  for (int i = 0; i < iterations; i++)
-    {
-      read_mpu6050(fd, &imu_acc_data, &imu_gyro_data);
-
-      accelerometer.axis.x = imu_acc_data.x;
-      accelerometer.axis.y = imu_acc_data.y;
-      accelerometer.axis.z = imu_acc_data.z;
-
-      gyroscope.axis.x = imu_gyro_data.x;
-      gyroscope.axis.y = imu_gyro_data.y;
-      gyroscope.axis.z = imu_gyro_data.z;
-
-      FusionAhrsUpdateNoMagnetometer(&ahrs,
-                                     gyroscope,
-                                     accelerometer,
-                                     acq_period);
-      euler = FusionQuaternionToEuler(FusionAhrsGetQuaternion(&ahrs));
-
-      printf("Yaw: %.3f | Pitch: %.3f | Roll: %.3f\n",
-             euler.angle.yaw, euler.angle.pitch, euler.angle.roll);
-      usleep(CONFIG_EXAMPLES_SENSOR_FUSION_SAMPLE_RATE * 1000);
-    }
-
+        usleep(CONFIG_EXAMPLES_SENSOR_FUSION_SAMPLE_RATE * 1000);
+      }
+  }
   close(fd);
 
   return EXIT_SUCCESS;
