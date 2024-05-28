@@ -22,50 +22,14 @@
  * Included Files
  ****************************************************************************/
 
-#include <nuttx/config.h>
-
-#include <sys/types.h>
-#include <sys/ioctl.h>
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <string.h>
-#include <fcntl.h>
-#include <errno.h>
-#include <debug.h>
-
-#include <nuttx/analog/adc.h>
-#include <nuttx/analog/ioctl.h>
-#include <nuttx/analog/ads7953.h>
-
-// #include <nuttx/sensors/ioctl.h>
-
-#include "adc.h"
 #include "cubus_app_main.h"
-#include "math.h"
-
-#define IOCTL_MODE  1
-// #define READ_MODE   1
-
-#define EXT_ADC_MAX_CHANNELS  12
-
-#define RES_LMP8640				0.025
-#define GAIN_LMP8640			10
-
-#define SENS_TMCS				264
 
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
-// struct 
 
-/****************************************************************************
- * spi_test_main
- ****************************************************************************/
 static void adc_devpath(FAR struct adc_state_s *adc, FAR const char *devpath);
 int int_adc_main();
-
 
 /****************************************************************************
  * Private Data
@@ -73,27 +37,12 @@ int int_adc_main();
 static struct adc_state_s g_adcstate1;
 static struct adc_state_s g_adcstate3;
 
-int elapsed =0;
+int elapsed = 0;
 int required  = 10;
 
 int ret;
 int i = 0; 
 char buffer[255] = {'\0'};
-
-typedef struct {
-  size_t readsize;
-  ssize_t nbytes;
-  int fd;
-  int errval;
-  int ret;
-}int_adc_config_s;
-
-
-typedef struct {
-  int fd;
-}ext_adc_config_s;
-
-
 
 #ifdef CONFIG_EXAMPLES_CUBUS_USE_INT_ADC1
   int_adc_config_s adc1_config;
@@ -113,13 +62,25 @@ uint8_t raw_data[2] = {'\0'};
 uint16_t combined_data[EXT_ADC_MAX_CHANNELS] = {'\0'};
 float processed_data_ext_adc[EXT_ADC_MAX_CHANNELS] = {'\0'};
 
-satellite_health_s sat_health;
+satellite_health_s sat_health = {'\0'};
 ext_adc_s ext_adc_data[EXT_ADC_MAX_CHANNELS];
 
-/****************************************************************************
- * Name: parse_args
- ****************************************************************************/
 
+
+int smart_mount(){
+
+  ret = mount("/dev/flash", "/mnt", "smartfs", 0, NULL);
+  if (ret >= 0) {
+    printf("Mount successful\n");
+  } else {
+    perror("Error: Mount failed");
+    return 1;
+  }
+}
+
+/****************************************************************************
+ * Name: main
+ ****************************************************************************/
 int main(int argc, FAR char *argv[])
 {
   
@@ -138,6 +99,8 @@ int main(int argc, FAR char *argv[])
   make_satellite_health();
 
   print_satellite_health_data();
+
+  smart_mount();
 
   return 0;
 }
@@ -261,7 +224,7 @@ int read_int_adc1(){
               for (i = 0; i < nsamples; i++)
                 {
                   printf("%d: channel: %d value: %" PRId32 "\n",
-                         i + 1, int_adc1_sample[i].am_channel, int_adc1_sample[i].am_data);
+                         i, int_adc1_sample[i].am_channel, int_adc1_sample[i].am_data);
                 }
             }
         }
@@ -405,7 +368,7 @@ int read_int_adc3(){
               for (i = 0; i < nsamples; i++)
                 {
                   printf("%d: channel: %d value: %" PRId32 "\n",
-                         i + 1, int_adc3_sample[i].am_channel, int_adc3_sample[i].am_data);
+                         i , int_adc3_sample[i].am_channel, int_adc3_sample[i].am_data);
                 }
             }
         }
@@ -521,6 +484,7 @@ void make_satellite_health(){
   sat_health.temp_bpb = (int16_t)ext_adc_data[10].processed_data;
   sat_health.temp_z = (int16_t)ext_adc_data[11].processed_data;
 
+
   /* Internal ADC1 data */
   sat_health.batt_c = (int16_t)int_adc1_temp[9];
   sat_health.sol_t_c = (int16_t)int_adc1_temp[10];
@@ -597,9 +561,10 @@ void int_adc1_data_convert(float *temp_buff){
 
   // float temp_buff[CONFIG_EXAMPLES_CUBUS_INT_ADC1_NSAMPLES];
   float ADC_SUP = 1.2 * 4095/(int_adc1_sample[17].am_data);
-
+  float temp[CONFIG_EXAMPLES_CUBUS_INT_ADC1_NSAMPLES] = {'\0'};
   for(int i=0;i<CONFIG_EXAMPLES_CUBUS_INT_ADC1_NSAMPLES;i++){
-    temp_buff[i] = int_adc1_sample[i].am_data * 1.2 / 4095; //right now, using 1.2 as vrefint channel data... converting all the data to their respective voltages
+    temp[i] = int_adc1_sample[i].am_data;
+    temp_buff[i] = (temp[i] * 1.2 / 4095); //right now, using 1.2 as vrefint channel data... converting all the data to their respective voltages
     if(i == 4){
       temp_buff[i] = temp_buff[i];  //this is for battery monitor (voltage data, no need for conversion)
     }else if(i == 9 || i == 10 || i == 11){ //this one is for battery current, solar panel total current and raw current respectively
@@ -625,10 +590,12 @@ void int_adc1_data_convert(float *temp_buff){
 
 void int_adc3_data_convert(float *temp_buff){
   for(int i=0;i<CONFIG_EXAMPLES_CUBUS_INT_ADC3_NSAMPLES;i++){
-    temp_buff[i] = int_adc3_sample[0].am_data * 1.2 / 4095;
-    temp_buff[i] = (temp_buff[i]/(2*RES_LMP8640*GAIN_LMP8640))*1000;
+    temp_buff[i] = (float)int_adc3_sample[0].am_data * 1.2 / 4095;
+    temp_buff[i] = (float)(temp_buff[i]/(2*RES_LMP8640*GAIN_LMP8640))*1000;
   }
 }
+
+
 
 /****************************************************************************
  * Name: adc_devpath
