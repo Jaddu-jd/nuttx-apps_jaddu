@@ -24,6 +24,7 @@
 
 #include <nuttx/config.h>
 #include <stdio.h>
+#include <fcntl.h>
 
 /****************************************************************************
  * Public Functions
@@ -36,5 +37,30 @@
 int main(int argc, FAR char *argv[])
 {
   printf("Hello, World!!\n");
+  uint32_t counter =0;
+  uint8_t fd, ret,data ;
+  uint8_t data1[3500];
+  uint8_t command[] ={'C','A','M','O','N'};
+  fd = open("/dev/ttyS1", O_RDWR);
+    write(fd, command, sizeof(command));
+
+  while(1){
+  ret = read(fd, &data, 1);
+  // counter++;
+  data1[counter] = data;
+  // if(counter %100 ==0){
+  //   printf("Counter is %d\n", counter);
+  // }
+  if(data1[counter-1] == 0xff && data1[counter] ==0xd9){
+    printf(" %02x %02x\n",data1[counter -1], data1[counter]);
+    break;
+  }
+  counter++;
+  // printf("%d ",data);
+  }
+  close(fd);
+  printf("Total size of data received : %d \n", counter);
+
+  
   return 0;
 }
