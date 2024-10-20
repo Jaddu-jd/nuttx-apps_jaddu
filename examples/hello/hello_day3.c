@@ -162,7 +162,7 @@ int main(int argc, FAR char *argv[])
     // sleep(1);
     // handshake();
     gpio_write(GPIO_OCP_EN, true);
-    // sleep(3);
+    sleep(3);
     // fd = open("/dev/ttyS1", O_WRONLY);
     // write(fd, command, sizeof(command));
     // close(fd);
