@@ -28,14 +28,12 @@
 #include <stdio.h>
 #include <fcntl.h>
 #include <syslog.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <errno.h>
+#include <time.h>
 
 /****************************************************************************
  * Public Functions
  ****************************************************************************/
-
+#define UART_OUT_DEVICE "/dev/ttyS1"
 int gpio_write(uint32_t pin, uint8_t mode);
 
 void handshake()
@@ -49,43 +47,29 @@ void handshake()
     printf("Failed to open UART device: %d\n", errno);
     return;
   }
-
-  while (i < 7)
-  {
-    ret = read(fd1, &command_in[i], 1);
-    if (ret < 0)
-    {
-      if (errno == EAGAIN)
-      {
-        continue;
-      }
-      else
-      {
-        printf("Read error: %d\n", errno);
-        break;
-      }
-    }
-    else if (ret > 0)
-    {
-      write(fd1, &command_in[i], 1);
-      i++;
-    }
+  else{
+    printf("opened uart device for handshaking\n");
   }
 
-  printf("Received command: ");
-  for (int j = 0; j < i; j++)
-  {
-    printf("%02X ", command_in[j]);
+  ret = read(fd1,command_in, 7);
+  if(ret > 0){
+    printf("data received is %s\n,command_in");
   }
-  printf("\n");
+  close(fd1);
+  fd1 = open("/dev/ttyS1", O_RDWR);
+  uint8_t data2[]={0x53,0x01,0x02,0x03,0x04,0x7e,'\0'};
+  ret = write(fd1,data2, 7);
+ if(ret > 0){
+    printf("data sent ");
+  }
 
   if (command_in[0] == 0x53 || command_in[1] == 0x53)
   {
-    printf("Handshake successful with command: %02X\n", command_in[0]);
+    printf("Handshake successful with command: %02X %02X %02X %02X %02X %02X\n", command_in[0],  command_in[1], command_in[2], command_in[3], command_in[4], command_in[5]);
   }
   else
   {
-    printf("Handshake failed, unexpected command: %02X\n", command_in[0]);
+    printf("Handshake failed, unexpected command:  %02X %02X %02X %02X %02X %02X\n", command_in[0],  command_in[1], command_in[2], command_in[3], command_in[4], command_in[5]);
   }
 
   close(fd1);
@@ -93,14 +77,15 @@ void handshake()
 
 int main(int argc, FAR char *argv[])
 {
+  
   printf("\n************************* S2S camera mission turned on ***************\n");
 
   uint32_t counter = 0, counter2 = 0;
   uint8_t fd, ret, data;
-  uint8_t data1[17500] = {'\0'}, data2[24600] = {'\0'};
+  uint8_t data1[27500] = {'\0'}, data2[35500] = {'\0'};
 
   printf("**************************** Starting handshake sequence ********************\n");
-  // handshake(); // Uncomment if handshake is needed
+  handshake(); // Uncomment if handshake is needed
   gpio_write(GPIO_OCP_EN, false);
 
   fd = open("/dev/ttyS3", O_RDWR);
@@ -115,7 +100,11 @@ int main(int argc, FAR char *argv[])
   sleep(1);
 
   printf("Command verified\nEnabling OCP\n");
-
+  int fd1 = open(UART_OUT_DEVICE, O_WRONLY);
+  if (fd < 0) {
+      printf("Failed to open %s: %d\n", UART_OUT_DEVICE, errno);
+      return -1;
+  }
   fd = open("/dev/ttyS3", O_RDONLY);
   while (1)
   {
@@ -154,23 +143,55 @@ int main(int argc, FAR char *argv[])
   printf("\n******************* Disabling OCP ****************\n");
   gpio_write(GPIO_OCP_EN, false);
 
+
+ //write to file
+  struct file file_pointer, file_pointer2;
+  fd = file_open(&file_pointer,"/mnt/fs/sfm/mtd_mission/cam_nir.txt", O_CREAT | O_WRONLY | O_APPEND);
+  ssize_t bytes_written = file_write(&file_pointer, data1, counter + 1);
+  printf("\nThe total bytes of nir image written to mtd_mission/cam_nir.txt is %d\n",bytes_written);
+  file_syncfs(&file_pointer);
+  file_close(&file_pointer);
+  fd =-9;
+  fd = file_open(&file_pointer2,"/mnt/fs/sfm/mtd_mission/cam_rgb.txt", O_CREAT | O_WRONLY | O_APPEND);
+  bytes_written = file_write(&file_pointer2, data2, counter2 + 1);
+  printf("\nThe total bytes of nir image written to mtd_mission/cam_rgb.txt is %d\n",bytes_written);
+  file_syncfs(&file_pointer2);
+  file_close(&file_pointer2);
+
+  printf("\n----------------------------------------Saved to flash memory-------------------------------------------\n");
+  
+
+
   printf("\nTotal size of data received : %d \n\n", counter2);
 
   for (int16_t i = 0; i <= counter; i++)
   {
     printf("%02x ", data1[i]);
+    write(fd, &data1[i], 1);
   }
+  write(fd, 0xff,1);
   printf("\n \n------------------------\nData2 : %d \n\n", counter2);
 
   for (int16_t i = 0; i <= counter2; i++)
   {
     printf("%02x ", data2[i]);
+    write(fd, &data2[i], 1);
   }
 
-  printf("\nReached cpt.1\n");
+  // printf("\n----------------------------------------Image captured and saving-------------------------------------------\n");
+ fd = -1;
+  uint8_t x[]={0xff,0xd9,'\0'};
+  fd = open("/dev/ttyS1", O_RDWR);
+  int ret2;
+  if(ret2 >= 0){
+    printf("0xff 0xd9 sent to OBC");
+  }
+  close(fd);
+  sleep(160000);
 
   return 0;
 }
+
 
 int gpio_write(uint32_t pin, uint8_t mode)
 {
